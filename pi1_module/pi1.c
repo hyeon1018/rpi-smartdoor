@@ -6,6 +6,7 @@
 #include <linux/interrupt.h>
 //#include <linux/cdev.h>
 #include <linux/timer.h>
+#include <linux/delay.h>
 
 
 // GPIO PIN number
@@ -27,6 +28,15 @@
 
 MODULE_LICENSE("GPL");
 
+
+
+/* TODO
+receive keymat_state from pi2
+send pir_state to pi2
+*/
+
+
+
 static int irq_pir;
 //pir is 1 when deteced, light is 1 when light has to turn on, keymat is 1 when detected 
 static int pir_state, light_state, keymat_state = 0;
@@ -34,14 +44,12 @@ static struct timer_list led_timer;
 
 static void led_timer_expired(unsigned long data);
 
-static struct pi1_gpios[6] = {{LED, GPIOF_OUT_INIT_LOW, "led"},
+static struct gpio pi1_gpios[6] = {{LED, GPIOF_OUT_INIT_LOW, "led"},
                               {PIR, GPIOF_IN, "pir"},
                               {LIGHT_CLK, GPIOF_INIT_LOW, "light_clk"},
                               {LIGHT_IN, GPIOF_IN, "light_in"},
                               {LIGHT_OUT, GPIOF_INIT_LOW, "light_data_out"},
                               {LIGHT_EN, GPIOF_INIT_HIGH, "light_enable"}};
-
-
 
 
 //if request failed, consider keymat_state is 0
@@ -51,18 +59,18 @@ static void request_keymat_state(void) {
     //if received value is invalid(failed), keymat_state is 0
 }
 
-static void set_light_state() {
+static void set_light_state(void) {
     //int brightness = get_value_from_lighe_sensor
     //if brightness is over LIGHT_MIN, light_state = 0;
     //less then LIGHT_MIN, light_state = 1
 
     int i;
-    int data = REQ_DATA;
+    int data = SPI_REQ_DATA;
     int bright = 0;
 
     gpio_set_value(LIGHT_EN, 0);
 
-    for (i = 0; i < CLK_LENGTH; i++){
+    for (i = 0; i < SPI_CLK_LENGTH; i++){
         gpio_set_value(LIGHT_CLK, 0);
         gpio_set_value(LIGHT_OUT, data & 0x01);
         data >>= 1;
@@ -80,7 +88,7 @@ static void set_light_state() {
     
 }
 
-static void init_state() {
+static void init_state(void) {
     pir_state = 0;
     light_state = 0;
     keymat_state = 0;
@@ -96,14 +104,14 @@ static void led_timer_reset(void) {
 
     if(gpio_get_value(LED)) del_timer(&led_timer);
     led_timer.expires = get_jiffies_64() + TIMER_SEC*HZ;
-    led_timer.funtion = led_timer_expired;
+    led_timer.function = led_timer_expired;
     add_timer(&led_timer);
 }
 
 // when pir didn't detect human
 static void led_timer_expired(unsigned long data) {
     pir_state = 0;
-    request_keypad_state();
+    request_keymat_state();
 
     if(keymat_state) {
         led_timer_reset();
