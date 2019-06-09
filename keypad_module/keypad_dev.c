@@ -36,19 +36,32 @@ static struct cdev * cd_cdev;
 static void reset_pos_func(unsigned long data){
     printk("keypad : timeout, pos = 0\n");
     pos = 0;
+    if(newpass){
+        kfree(newpass);
+        newpass = NULL;
+        mode = 0;
+    }
 }
 
 static int keyevent(char key){
     mod_timer(&reset_timer, jiffies + 5*HZ);
     if(key >= '0' && key <= '9'){
-        if(password[pos] == key){
+        if(mode){
+            newpass[pos] = key;
+            pos++;
+        }else if(password[pos] == key){
             pos++;
         }else{
             pos = 0;
         }
     }else if(key == '#'){
-        if(mode = 1){
-
+        if(mode){
+            newpass[pos] = '#';
+            kfree(password);
+            password = newpass;
+            newpass = NULL;
+            printk("NEW PASSWORD : %s", password);
+            mode = 0;
         }else if(password[pos] == '#'){
             printk("correct password\n");
         }else{
@@ -56,7 +69,9 @@ static int keyevent(char key){
         }
         pos = 0;
     }else if(key == 'R'){
+        newpass = (char *)kmalloc(512 * sizeof(char), GFP_KERNEL);
         mode = 1;
+        pos = 0;
     }else if(key == 'O'){
         printk("open door\n");
         pos = 0;
@@ -161,13 +176,6 @@ static int __init keypad_init(void){
 
     //init password.
     password = (char *)kmalloc(512 * sizeof(char), GFP_KERNEL);
-    password[0] = '9';
-    password[1] = '7';
-    password[2] = '4';
-    password[3] = '3';
-    password[4] = '1';
-    password[5] = '2';
-    password[6] = '#';
 
     init_timer(&reset_timer);
     reset_timer.function = reset_pos_func;
