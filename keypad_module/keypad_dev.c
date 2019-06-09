@@ -5,6 +5,7 @@
 #include <linux/gpio.h>
 #include <linux/cdev.h>
 #include <linux/wait.h>
+#include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/kthread.h>
 
@@ -20,14 +21,51 @@
 #define DEV_NAME "keypad_dev"
 
 spinlock_t input_lock;
-static char * input;
-static char * data;
 wait_queue_head_t wait_queue;
 struct task_struct * keypad_task = NULL;
+static struct timer_list reset_timer;
 
+char * password = NULL;
+char * newpass = NULL;
+int pos = 0;
+int mode = 0; 
 
 static dev_t dev_num;
 static struct cdev * cd_cdev;
+
+static void reset_pos_func(unsigned long data){
+    printk("keypad : timeout, pos = 0\n");
+    pos = 0;
+}
+
+static int keyevent(char key){
+    mod_timer(&reset_timer, jiffies + 5*HZ);
+    if(key >= '0' && key <= '9'){
+        if(password[pos] == key){
+            pos++;
+        }else{
+            pos = 0;
+        }
+    }else if(key == '#'){
+        if(mode = 1){
+
+        }else if(password[pos] == '#'){
+            printk("correct password\n");
+        }else{
+            printk("incorrect password\n");
+        }
+        pos = 0;
+    }else if(key == 'R'){
+        mode = 1;
+    }else if(key == 'O'){
+        printk("open door\n");
+        pos = 0;
+    }
+
+    printk("keypad : pos : %d\n", pos);
+
+    return 0;
+}
 
 static int keypad_scan_thread(void * data){
     int i;
@@ -101,9 +139,8 @@ static int keypad_scan_thread(void * data){
         }
 
         if(curt_scan && curt_scan != prev_scan){
-            printk("KEY : %c\n", curt_scan);
+            keyevent(curt_scan);
         }
-        
         prev_scan = curt_scan;
     }
 
@@ -111,7 +148,6 @@ static int keypad_scan_thread(void * data){
 }
 
 static int __init keypad_init(void){
-    int r;
     //gpio request.
     gpio_request_one(K_SCAN1, GPIOF_OUT_INIT_LOW, "key_scan_1");
     gpio_request_one(K_SCAN2, GPIOF_OUT_INIT_LOW, "key_scan_2");
@@ -124,17 +160,29 @@ static int __init keypad_init(void){
     gpio_request_one(K_IN4, GPIOF_IN, "key_in_4");
 
     //init password.
-    printk("init module \n");
+    password = (char *)kmalloc(512 * sizeof(char), GFP_KERNEL);
+    password[0] = '9';
+    password[1] = '7';
+    password[2] = '4';
+    password[3] = '3';
+    password[4] = '1';
+    password[5] = '2';
+    password[6] = '#';
+
+    init_timer(&reset_timer);
+    reset_timer.function = reset_pos_func;
+    reset_timer.data = 0L;
 
     keypad_task = kthread_create(keypad_scan_thread, NULL, "keypad_scan_thread");
     if(IS_ERR(keypad_task)){
         keypad_task = NULL;
         printk("KEYPAD_SCAN_TASK CREATE ERROR\n");
     }
-
     wake_up_process(keypad_task);
 
-    spin_lock_init(&input_lock);
+    //regs char device file.
+    
+
     return 0;
 }
 
