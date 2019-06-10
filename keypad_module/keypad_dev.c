@@ -8,6 +8,7 @@
 #include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/kthread.h>
+#include <asm/uaccess.h>
 
 #define K_SCAN1 6
 #define K_SCAN2 13
@@ -27,11 +28,9 @@ static struct timer_list reset_timer;
 
 char * password = NULL;
 char * newpass = NULL;
+int msg = 0; // 1 ACCEPT, 2 REJECT;
 int pos = 0;
-int mode = 0; 
-
-static dev_t dev_num;
-static struct cdev * cd_cdev;
+int mode = 0; // 1 when change password.
 
 static void reset_pos_func(unsigned long data){
     printk("keypad : timeout, pos = 0\n");
@@ -64,8 +63,12 @@ static int keyevent(char key){
             mode = 0;
         }else if(password[pos] == '#'){
             printk("correct password\n");
+            msg = 1;
+            wake_up_interruptible(&wait_queue);
         }else{
             printk("incorrect password\n");
+            msg = 2;
+            wake_up_interruptible(&wait_queue);
         }
         pos = 0;
     }else if(key == 'R'){
@@ -162,6 +165,42 @@ static int keypad_scan_thread(void * data){
     return 0;
 }
 
+static ssize_t keypad_read(struct file * file, char * buf, size_t len, loff_t * loff){
+    char * buff;
+    int msg_len, err;
+
+    if(wait_event_interruptible(wait_queue, msg != 0)){
+        return -1;
+    }
+    //spinlock
+    switch (msg) {
+        case 1 :
+            buff = "ACCEPT";
+            break;
+        case 2 : 
+            buff = "REJECT";
+            break;
+        default : 
+            buff = "ERROR";
+    }
+    msg_len = strlen(buff);
+    err = copy_to_user(buf, buff, msg_len);
+    msg = 0;
+    //spinunlock
+
+    if(err > 0){
+        return err;
+    }
+    return msg_len;
+}
+
+struct file_operations keypad_fops = {
+    .read = keypad_read
+};
+
+static dev_t dev_num;
+static struct cdev * cd_cdev;
+
 static int __init keypad_init(void){
     //gpio request.
     gpio_request_one(K_SCAN1, GPIOF_OUT_INIT_LOW, "key_scan_1");
@@ -177,9 +216,15 @@ static int __init keypad_init(void){
     //init password.
     password = (char *)kmalloc(512 * sizeof(char), GFP_KERNEL);
 
+    init_waitqueue_head(&wait_queue);
     init_timer(&reset_timer);
     reset_timer.function = reset_pos_func;
     reset_timer.data = 0L;
+
+    alloc_chrdev_region(&dev_num, 0, 1, DEV_NAME);
+    cd_cdev = cdev_alloc();
+    cdev_init(cd_cdev, &keypad_fops);
+    cdev_add(cd_cdev, dev_num, 1);
 
     keypad_task = kthread_create(keypad_scan_thread, NULL, "keypad_scan_thread");
     if(IS_ERR(keypad_task)){
@@ -188,13 +233,12 @@ static int __init keypad_init(void){
     }
     wake_up_process(keypad_task);
 
-    //regs char device file.
-    
-
     return 0;
 }
 
 static void __exit keypad_exit(void){
+    cdev_del(cd_cdev);
+    unregister_chrdev_region(dev_num, 1);
 
     gpio_free(K_SCAN1);
     gpio_free(K_SCAN2);
