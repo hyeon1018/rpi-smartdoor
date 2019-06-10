@@ -19,9 +19,11 @@
 #define K_IN3 20
 #define K_IN4 21
 
+#define PW_MAX_LENGTH 128
+
 #define DEV_NAME "keypad_dev"
 
-spinlock_t input_lock;
+spinlock_t event_lock;
 wait_queue_head_t wait_queue;
 struct task_struct * keypad_task = NULL;
 static struct timer_list reset_timer;
@@ -59,20 +61,24 @@ static int keyevent(char key){
             kfree(password);
             password = newpass;
             newpass = NULL;
-            printk("NEW PASSWORD : %s", password);
             mode = 0;
+            
+            spin_lock(&event_lock);
+            msg = 3;
+            spin_unlock(&event_lock);
         }else if(password[pos] == '#'){
-            printk("correct password\n");
+            spin_lock(&event_lock);
             msg = 1;
-            wake_up_interruptible(&wait_queue);
+            spin_unlock(&event_lock);
         }else{
-            printk("incorrect password\n");
+            spin_lock(&event_lock);
             msg = 2;
-            wake_up_interruptible(&wait_queue);
+            spin_unlock(&event_lock);
         }
+        wake_up_interruptible(&wait_queue);
         pos = 0;
     }else if(key == 'R'){
-        newpass = (char *)kmalloc(512 * sizeof(char), GFP_KERNEL);
+        newpass = (char *)kmalloc(PW_MAX_LENGTH * sizeof(char), GFP_KERNEL);
         mode = 1;
         pos = 0;
     }else if(key == 'O'){
@@ -172,7 +178,8 @@ static ssize_t keypad_read(struct file * file, char * buf, size_t len, loff_t * 
     if(wait_event_interruptible(wait_queue, msg != 0)){
         return -1;
     }
-    //spinlock
+
+    spin_lock(&event_lock);
     switch (msg) {
         case 1 :
             buff = "ACCEPT";
@@ -180,13 +187,16 @@ static ssize_t keypad_read(struct file * file, char * buf, size_t len, loff_t * 
         case 2 : 
             buff = "REJECT";
             break;
+        case 3 :
+            buff = "CHANGE";
+            break;
         default : 
             buff = "ERROR";
     }
+    msg = 0;
+    spin_unlock(&event_lock);
     msg_len = strlen(buff);
     err = copy_to_user(buf, buff, msg_len);
-    msg = 0;
-    //spinunlock
 
     if(err > 0){
         return err;
@@ -214,7 +224,7 @@ static int __init keypad_init(void){
     gpio_request_one(K_IN4, GPIOF_IN, "key_in_4");
 
     //init password.
-    password = (char *)kmalloc(512 * sizeof(char), GFP_KERNEL);
+    password = (char *)kmalloc(PW_MAX_LENGTH * sizeof(char), GFP_KERNEL);
 
     init_waitqueue_head(&wait_queue);
     init_timer(&reset_timer);
