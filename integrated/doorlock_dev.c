@@ -167,18 +167,18 @@ static long door_ioctl(struct file *file, unsigned int cmd, unsigned long arg){
     int pir = 0;
     int oc = 0;
 
-    switch(cmd){
-        case MOTOR:
-	        pir = (int)arg;
-	  		    motor(pir);
-	  		    break;
-	    case FORCE:
-	  	    oc = (int)arg;
-	  	    force(oc);
-	  	    break;
-	  	default:
-	        return -1;
-    }
+	switch(cmd){
+		case MOTOR:
+			pir = (int)arg;
+			motor(pir);
+			break;
+		case FORCE:
+			oc = (int)arg;
+			force(oc);
+			break;
+		default:
+			return -1;
+		}
 
     return 0;
 }
