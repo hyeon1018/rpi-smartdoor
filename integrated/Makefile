@@ -1,0 +1,14 @@
+obj-m := doorlock_dev.o
+
+KERNELDIR := ~/linux-rpi/
+ARM := ARCH=arm CROSS_COMPILE=arm-linux-gnueabi-
+PWD := $(shell pwd)
+
+default:
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) $(ARM) modules
+clean:
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) $(ARM) clean
+copy:
+	scp doorlock_dev.ko pi@10.10.10.13:~/
+ssh:
+	ssh pi@10.10.10.13
