@@ -32,12 +32,12 @@
 #define STEPS 8
 
 //etc.
-#define LED 16          // k_in2 overlap
-#define PIR 20           //k_in3 overlap
-#define LIGHT_CLK 13    //k_scan2 overlap
-#define LIGHT_IN 6      //k_scan1 overlap
-#define LIGHT_OUT 5
-#define LIGHT_EN 24
+#define LED 3 //check whether usable, about LED2 where?
+#define PIR 5
+#define LIGHT_CLK 18
+#define LIGHT_IN 23
+#define LIGHT_OUT 24
+#define LIGHT_EN 25
 
 #define LIGHT_MIN 500           // min value of light sensor for LED on
 #define TIMER_SEC 10            // time of light lasts on
@@ -109,11 +109,296 @@ static struct gpio dev_gpios[18] = {{LED, GPIOF_OUT_INIT_LOW, "led"},
 
 
 ///////////////////////// keymatrix functions /////////////////////////
+static void reset_pos_func(unsigned long data){
+    printk("keypad : timeout, pos = 0\n");
+    pos = 0;
+    if(newpass){
+        kfree(newpass);
+        newpass = NULL;
+        mode = 0;
+    }
+}
 
+static int keyevent(char key){
+    mod_timer(&reset_timer, jiffies + 5*HZ);
+    if(key >= '0' && key <= '9'){
+        if(mode){
+            newpass[pos] = key;
+            pos++;
+        }else if(password[pos] == key){
+            pos++;
+        }else{
+            pos = 0;
+        }
+    }else if(key == '#'){
+        if(mode){
+            newpass[pos] = '#';
+            kfree(password);
+            password = newpass;
+            newpass = NULL;
+            mode = 0;
+            
+            spin_lock(&event_lock);
+            msg = 3;
+            spin_unlock(&event_lock);
+        }else if(password[pos] == '#'){
+            spin_lock(&event_lock);
+            msg = 1;
+            spin_unlock(&event_lock);
+        }else{
+            spin_lock(&event_lock);
+            msg = 2;
+            spin_unlock(&event_lock);
+        }
+        wake_up_interruptible(&wait_queue);
+        pos = 0;
+    }else if(key == 'R'){
+        newpass = (char *)kmalloc(PW_MAX_LENGTH * sizeof(char), GFP_KERNEL);
+        mode = 1;
+        pos = 0;
+    }else if(key == 'O'){
+        printk("open door\n");
+        pos = 0;
+    }
+
+    printk("keypad : pos : %d\n", pos);
+
+    return 0;
+}
+
+static int keypad_scan_thread(void * data){
+    int i;
+    int scandata[4];
+    char prev_scan = 0;
+    char curt_scan = 0;
+
+    int scan1[4] = {1, 0, 0, 0};
+    int scan2[4] = {0, 1, 0, 0};
+    int scan3[4] = {0, 0, 1, 0};
+    int scan4[4] = {0, 0, 0, 1};
+     
+    while(!kthread_should_stop()){
+        curt_scan = 0;
+        for(i = 0 ; i < 4 ; i++){
+            gpio_set_value(K_SCAN1, scan1[i]);
+            gpio_set_value(K_SCAN2, scan2[i]);
+            gpio_set_value(K_SCAN3, scan3[i]);
+            gpio_set_value(K_SCAN4, scan4[i]);
+
+            udelay(1);
+
+            scandata[0] = gpio_get_value(K_IN1);
+            scandata[1] = gpio_get_value(K_IN2);
+            scandata[2] = gpio_get_value(K_IN3);
+            scandata[3] = gpio_get_value(K_IN4);
+
+            if(i == 0){
+                if(scandata[0]){
+                    curt_scan = '1';
+                }else if(scandata[1]){
+                    curt_scan = '2';
+                }else if(scandata[2]){
+                    curt_scan = '3';
+                }else if(scandata[3]){
+                    curt_scan = 'R';
+                }
+            }else if(i == 1){
+                if(scandata[0]){
+                    curt_scan = '4';
+                }else if(scandata[1]){
+                    curt_scan = '5';
+                }else if(scandata[2]){
+                    curt_scan = '6';
+                }else if(scandata[3]){
+                    curt_scan = 'O';
+                }
+            }else if(i == 2){
+                if(scandata[0]){
+                    curt_scan = '7';
+                }else if(scandata[1]){
+                    curt_scan = '8';
+                }else if(scandata[2]){
+                    curt_scan = '9';
+                }else if(scandata[3]){
+                    curt_scan = 'A';
+                }
+            }else if(i == 3){
+                if(scandata[0]){
+                    curt_scan = '*';
+                }else if(scandata[1]){
+                    curt_scan = '0';
+                }else if(scandata[2]){
+                    curt_scan = '#';
+                }else if(scandata[3]){
+                    curt_scan = 'B';
+                }
+            }
+
+            msleep(1);
+        }
+
+        if(curt_scan && curt_scan != prev_scan){
+            keyevent(curt_scan);
+        }
+        prev_scan = curt_scan;
+    }
+
+    return 0;
+}
 ///////////////////////// motor functions /////////////////////////
+static void setStep(int pin1, int pin2, int pin3, int pin4){
+	gpio_set_value(PIN1, pin1);
+	gpio_set_value(PIN2, pin2);
+	gpio_set_value(PIN3, pin3);
+	gpio_set_value(PIN4, pin4);
+}
+
+static void door_open(void){
+	int i = 0, j = 0;
+
+	if(door_state == 0){
+		setStep(0, 0, 0, 0);
+
+		for(i = 0; i < STEPS * 64; i++){
+			for(j = 0; j < 8; j++){
+				setStep(steps[j][0], steps[j][1], steps[j][2], steps[j][3]);
+				mdelay(1);
+			}
+		}
+
+		door_state = 1;
+	}
+}
+
+static void door_close(unsigned long data){
+	int i = 0, j = 0;
+
+	if(door_state == 1){
+		setStep(0, 0, 0, 0);
+
+		for(i = 0; i < STEPS * 64; i++){
+			for(j = 7; j >= 0; j--){
+				setStep(steps[j][0], steps[j][1], steps[j][2], steps[j][3]);
+				mdelay(1);
+			}
+		}
+
+		door_state = 0;
+	}
+}
+
+static void motor(int pir){
+	if(pir){
+		if(timer_pending(&motor_timer)){
+			del_timer(&motor_timer);
+		}
+		door_open();
+	}	//open: 1
+	else{
+		if(!timer_pending(&motor_timer)){
+			motor_timer.function = door_close;
+			motor_timer.data = 0L;
+			motor_timer.expires = jiffies + (10 * HZ); //can change
+			add_timer(&motor_timer);
+		}
+	}	//close: 0
+}
+//pir data handler
+
+static void force(int oc){
+	if(timer_pending(&motor_timer)){
+		del_timer(&motor_timer);
+	}
+
+	if(oc){
+		door_open();
+
+		motor_timer.function = door_close;
+		motor_timer.data = 0L;
+		motor_timer.expires = jiffies + (5 * HZ); //can change
+		add_timer(&motor_timer);
+	}
+	else{
+		door_close(0);
+	}
+}
 
 ///////////////////////// etc functions /////////////////////////
+//if request failed, consider keymat_state is 0
+static void request_keymat_state(void) {
+    //int received vaule = get_vaule_from_pi2
+    //if received value is valid, keymat_state = received value
+    //if received value is invalid(failed), keymat_state is 0
+}
 
+static void set_light_state(void) {
+    //int brightness = get_value_from_lighe_sensor
+    //if brightness is over LIGHT_MIN, light_state = 0;
+    //less then LIGHT_MIN, light_state = 1
+
+    int i;
+    int data = SPI_REQ_DATA;
+    int bright = 0;
+
+    gpio_set_value(LIGHT_EN, 0);
+
+    for (i = 0; i < SPI_CLK_LENGTH; i++){
+        gpio_set_value(LIGHT_CLK, 0);
+        gpio_set_value(LIGHT_OUT, data & 0x01);
+        data >>= 1;
+        udelay(SPI_CLK);
+        gpio_set_value(LIGHT_CLK, 1);
+        if(i > 11){
+            bright <<= 1;
+            bright |= gpio_get_value(LIGHT_IN) & 0x01;
+        }
+        udelay(SPI_CLK);
+    }
+    gpio_set_value(LIGHT_EN, 1);
+
+    light_state = (bright < LIGHT_MIN) ? 1 : 0;
+    
+}
+
+static void init_state(void) {
+    pir_state = 0;
+    light_state = 0;
+    keymat_state = 0;
+    gpio_set_value(LED, 0);
+}
+
+// when pir detected human
+static void led_timer_reset(void) {
+    printk("reset timer\n");
+
+    set_light_state();
+    if((pir_state || keymat_state) && light_state) gpio_set_value(LED, 1);
+
+    if(gpio_get_value(LED)) del_timer(&led_timer);
+    led_timer.expires = get_jiffies_64() + TIMER_SEC*HZ;
+    led_timer.function = led_timer_expired;
+    add_timer(&led_timer);
+}
+
+// when pir didn't detect human
+static void led_timer_expired(unsigned long data) {
+    pir_state = 0;
+    request_keymat_state();
+
+    if(keymat_state) {
+        led_timer_reset();
+    } else {
+        init_state();
+    }
+}
+
+static irqreturn_t pir_isr(int irq, void* dev_id) {
+    printk("pir detected, %d\n", gpio_get_value(PIR));
+    pir_state = 1;
+    led_timer_reset(); 
+
+    return IRQ_HANDLED;
+}
 
 ///////////////////////// ioctl init exit /////////////////////////
 static ssize_t keypad_read(struct file * file, char * buf, size_t len, loff_t * loff){
@@ -162,7 +447,7 @@ static int dev_release(struct inode *inode, struct file *file) {
   
     return 0;
 }
-
+/*
 static long door_ioctl(struct file *file, unsigned int cmd, unsigned long arg){
     int pir = 0;
     int oc = 0;
@@ -182,9 +467,10 @@ static long door_ioctl(struct file *file, unsigned int cmd, unsigned long arg){
 
     return 0;
 }
+*/
 
 struct file_operations doorlock_fops = {
-    .unlocked_ioctl = door_ioctl,
+//    .unlocked_ioctl = door_ioctl,
     .read = keypad_read,
     .open = dev_open,
     .release = dev_release
