@@ -32,8 +32,8 @@
 #define STEPS 8
 
 //etc.
-#define LED 3 //check whether usable, about LED2 where?
-#define PIR 5
+#define LED 14 //LED2 where?
+#define PIR 15
 #define LIGHT_CLK 18
 #define LIGHT_IN 23
 #define LIGHT_OUT 24
