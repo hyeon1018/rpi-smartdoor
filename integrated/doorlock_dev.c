@@ -47,14 +47,6 @@
 #define SPI_CLK 10
 
 #define DEV_NAME "doorlock_dev"
-/*
-#define IOCTL_START_NUM 0x80
-#define IOCTL_MOTOR IOCTL_START_NUM+1
-#define IOCTL_FORCE IOCTL_START_NUM+2
-#define IOCTL_NUM 'z'
-#define MOTOR _IOWR(SIMPLE_IOCTL_NUM, IOCTL_MOTOR, unsigned long *)
-#define FORCE _IOWR(SIMPLE_IOCTL_NUM, IOCTL_FORCE, unsigned long *)
-*/
 
 MODULE_LICENSE("GPL");
 
