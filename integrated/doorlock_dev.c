@@ -149,7 +149,11 @@ static int keyevent(char key){
 			spin_lock(&event_lock);
 			msg = 1;
 			spin_unlock(&event_lock);
-			motor(1);
+
+			if(pir_state == 1){
+				motor(1);
+			}
+			motor(0);
 		}else{
 			spin_lock(&event_lock);
 			msg = 2;
