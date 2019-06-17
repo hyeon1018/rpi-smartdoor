@@ -63,14 +63,17 @@ int pos = 0;
 int mode = 0; // 1 when change password.
 
 ///////////////////////// declare motor /////////////////////////
+int steps[STEPS][4] = {
+	{1, 0, 0, 0}, {1, 1, 0, 0}, {0, 1, 0, 0}, {0, 1, 1, 0},
+	{0, 0, 1, 0}, {0, 0, 1, 1}, {0, 0, 0, 1}, {1, 0, 0, 1}
+};
+
 static int door_state = 0; //0:closed 1: opened
 static struct timer_list motor_timer;
+static void motor(int oc);
+static void force(int oc);
 
 ///////////////////////// declare etc /////////////////////////
-/* TODO
-receive keymat_state from pi2
-send pir_state to pi2
-*/
 
 static int irq_pir;
 //pir is 1 when deteced, light is 1 when light has to turn on, keymat is 1 when detected 
@@ -81,167 +84,189 @@ static void led_timer_expired(unsigned long data);
 
 ///////////////////////// gpios /////////////////////////
 static struct gpio dev_gpios[18] = {{LED, GPIOF_OUT_INIT_LOW, "led"},
-                               {PIR, GPIOF_IN, "pir"},
-                               {LIGHT_CLK, GPIOF_INIT_LOW, "light_clk"},
-                               {LIGHT_IN, GPIOF_IN, "light_in"},
-                               {LIGHT_OUT, GPIOF_INIT_LOW, "light_data_out"},
-                               {LIGHT_EN, GPIOF_INIT_HIGH, "light_enable"},
-                               {K_SCAN1, GPIOF_OUT_INIT_LOW, "key_scan_1"},
-                               {K_SCAN2, GPIOF_OUT_INIT_LOW, "key_scan_2"},
-                               {K_SCAN3, GPIOF_OUT_INIT_LOW, "key_scan_3"},
-                               {K_SCAN4, GPIOF_OUT_INIT_LOW, "key_scan_4"},
-                               {K_IN1, GPIOF_IN, "key_in_1"},
-                               {K_IN2, GPIOF_IN, "key_in_2"},
-                               {K_IN3, GPIOF_IN, "key_in_3"},
-                               {K_IN4, GPIOF_IN, "key_in_4"},
-                               {PIN1, GPIOF_OUT_INIT_LOW, "p1"},
-                               {PIN2, GPIOF_OUT_INIT_LOW, "p2"},
-                               {PIN3, GPIOF_OUT_INIT_LOW, "p3"},
-                               {PIN4, GPIOF_OUT_INIT_LOW, "p4"}};
+				{PIR, GPIOF_IN, "pir"},
+				{LIGHT_CLK, GPIOF_INIT_LOW, "light_clk"},
+				{LIGHT_IN, GPIOF_IN, "light_in"},
+				{LIGHT_OUT, GPIOF_INIT_LOW, "light_data_out"},
+				{LIGHT_EN, GPIOF_INIT_HIGH, "light_enable"},
+				{K_SCAN1, GPIOF_OUT_INIT_LOW, "key_scan_1"},
+				{K_SCAN2, GPIOF_OUT_INIT_LOW, "key_scan_2"},
+				{K_SCAN3, GPIOF_OUT_INIT_LOW, "key_scan_3"},
+				{K_SCAN4, GPIOF_OUT_INIT_LOW, "key_scan_4"},
+				{K_IN1, GPIOF_IN, "key_in_1"},
+				{K_IN2, GPIOF_IN, "key_in_2"},
+				{K_IN3, GPIOF_IN, "key_in_3"},
+				{K_IN4, GPIOF_IN, "key_in_4"},
+				{PIN1, GPIOF_OUT_INIT_LOW, "p1"},
+				{PIN2, GPIOF_OUT_INIT_LOW, "p2"},
+				{PIN3, GPIOF_OUT_INIT_LOW, "p3"},
+				{PIN4, GPIOF_OUT_INIT_LOW, "p4"}};
 
 
 ///////////////////////// keymatrix functions /////////////////////////
 static void reset_pos_func(unsigned long data){
 	keymat_state = 0;	//spin lock?
 	
-    printk("keypad : timeout, pos = 0\n");
-    pos = 0;
-    if(newpass){
-        kfree(newpass);
-        newpass = NULL;
-        mode = 0;
-    }
+	printk("keypad : timeout, pos = 0\n");
+	pos = 0;
+
+	if(newpass){
+		kfree(newpass);
+		newpass = NULL;
+		mode = 0;
+	}
 }
 
 static int keyevent(char key){
 	keymat_state = 1;	//spin lock?
 	
-    mod_timer(&reset_timer, jiffies + 5*HZ);
+	mod_timer(&reset_timer, jiffies + 5*HZ);
 	
-    if(key >= '0' && key <= '9'){
-        if(mode){
-            newpass[pos] = key;
-            pos++;
-        }else if(password[pos] == key){
-            pos++;
-        }else{
-            pos = 0;
-        }
-    }else if(key == '#'){
-        if(mode){
-            newpass[pos] = '#';
-            kfree(password);
-            password = newpass;
-            newpass = NULL;
-            mode = 0;
-            
-            spin_lock(&event_lock);
-            msg = 3;
-            spin_unlock(&event_lock);
-        }else if(password[pos] == '#'){
-            spin_lock(&event_lock);
-            msg = 1;
-            spin_unlock(&event_lock);
+	if(key >= '0' && key <= '9'){
+		if(mode){
+			newpass[pos] = key;
+			pos++;
+		}
+		else if(password[pos] == key){
+			pos++;
+		}
+		else{
+			pos = 0;
+		}
+	}
+	else if(key == '#'){
+		if(mode){
+			newpass[pos] = '#';
+			kfree(password);
+			password = newpass;
+			newpass = NULL;
+			mode = 0;
+
+			spin_lock(&event_lock);
+			msg = 3;
+			spin_unlock(&event_lock);
+		}else if(password[pos] == '#'){
+			spin_lock(&event_lock);
+			msg = 1;
+			spin_unlock(&event_lock);
 			motor(1);
-        }else{
-            spin_lock(&event_lock);
-            msg = 2;
-            spin_unlock(&event_lock);
-        }
-        wake_up_interruptible(&wait_queue);
-        pos = 0;
-    }else if(key == 'R'){
-        newpass = (char *)kmalloc(PW_MAX_LENGTH * sizeof(char), GFP_KERNEL);
-        mode = 1;
-        pos = 0;
-    }else if(key == 'O'){
-        printk("open door\n");
-        pos = 0;
-    }
+		}else{
+			spin_lock(&event_lock);
+			msg = 2;
+			spin_unlock(&event_lock);
+		}
+		wake_up_interruptible(&wait_queue);
+		pos = 0;
+	}
+	else if(key == 'R'){
+		newpass = (char *)kmalloc(PW_MAX_LENGTH * sizeof(char), GFP_KERNEL);
+		mode = 1;
+		pos = 0;
+	}
+	else if(key == 'O'){
+		printk("open door\n");
+		pos = 0;
+	}
 
-    printk("keypad : pos : %d\n", pos);
+	printk("keypad : pos : %d\n", pos);
 
-    return 0;
+	return 0;
 }
 
 static int keypad_scan_thread(void * data){
-    int i;
-    int scandata[4];
-    char prev_scan = 0;
-    char curt_scan = 0;
+	int i;
+	int scandata[4];
+	char prev_scan = 0;
+	char curt_scan = 0;
 
-    int scan1[4] = {1, 0, 0, 0};
-    int scan2[4] = {0, 1, 0, 0};
-    int scan3[4] = {0, 0, 1, 0};
-    int scan4[4] = {0, 0, 0, 1};
+	int scan1[4] = {1, 0, 0, 0};
+	int scan2[4] = {0, 1, 0, 0};
+	int scan3[4] = {0, 0, 1, 0};
+	int scan4[4] = {0, 0, 0, 1};
      
-    while(!kthread_should_stop()){
-        curt_scan = 0;
-        for(i = 0 ; i < 4 ; i++){
-            gpio_set_value(K_SCAN1, scan1[i]);
-            gpio_set_value(K_SCAN2, scan2[i]);
-            gpio_set_value(K_SCAN3, scan3[i]);
-            gpio_set_value(K_SCAN4, scan4[i]);
+	while(!kthread_should_stop()){
+		curt_scan = 0;
 
-            udelay(1);
+		for(i = 0 ; i < 4 ; i++){
+			gpio_set_value(K_SCAN1, scan1[i]);
+			gpio_set_value(K_SCAN2, scan2[i]);
+			gpio_set_value(K_SCAN3, scan3[i]);
+			gpio_set_value(K_SCAN4, scan4[i]);
 
-            scandata[0] = gpio_get_value(K_IN1);
-            scandata[1] = gpio_get_value(K_IN2);
-            scandata[2] = gpio_get_value(K_IN3);
-            scandata[3] = gpio_get_value(K_IN4);
+			udelay(1);
 
-            if(i == 0){
-                if(scandata[0]){
-                    curt_scan = '1';
-                }else if(scandata[1]){
-                    curt_scan = '2';
-                }else if(scandata[2]){
-                    curt_scan = '3';
-                }else if(scandata[3]){
-                    curt_scan = 'R';
-                }
-            }else if(i == 1){
-                if(scandata[0]){
-                    curt_scan = '4';
-                }else if(scandata[1]){
-                    curt_scan = '5';
-                }else if(scandata[2]){
-                    curt_scan = '6';
-                }else if(scandata[3]){
-                    curt_scan = 'O';
-                }
-            }else if(i == 2){
-                if(scandata[0]){
-                    curt_scan = '7';
-                }else if(scandata[1]){
-                    curt_scan = '8';
-                }else if(scandata[2]){
-                    curt_scan = '9';
-                }else if(scandata[3]){
-                    curt_scan = 'A';
-                }
-            }else if(i == 3){
-                if(scandata[0]){
-                    curt_scan = '*';
-                }else if(scandata[1]){
-                    curt_scan = '0';
-                }else if(scandata[2]){
-                    curt_scan = '#';
-                }else if(scandata[3]){
-                    curt_scan = 'B';
-                }
-            }
+			scandata[0] = gpio_get_value(K_IN1);
+			scandata[1] = gpio_get_value(K_IN2);
+			scandata[2] = gpio_get_value(K_IN3);
+ 			scandata[3] = gpio_get_value(K_IN4);
 
-            msleep(1);
-        }
+			if(i == 0){
+				if(scandata[0]){
+					curt_scan = '1';
+				}
+				else if(scandata[1]){
+					curt_scan = '2';
+               			}
+				else if(scandata[2]){
+					curt_scan = '3';
+			 	}
+				else if(scandata[3]){
+					curt_scan = 'R';
+				}
+			}
+			else if(i == 1){
+				if(scandata[0]){
+					curt_scan = '4';
+        		        }
+				else if(scandata[1]){
+					curt_scan = '5';
+        		        }
+				else if(scandata[2]){
+					curt_scan = '6';
+				}
+				else if(scandata[3]){
+					curt_scan = 'O';
+				}
+			}else if(i == 2){
+				if(scandata[0]){
+					curt_scan = '7';
+				}
+				else if(scandata[1]){
+					curt_scan = '8';
+				}
+				else if(scandata[2]){
+					curt_scan = '9';
+				}
+				else if(scandata[3]){
+					curt_scan = 'A';
+				}
+			}
+			else if(i == 3){
+				if(scandata[0]){
+ 					curt_scan = '*';
+				}
+				else if(scandata[1]){
+					curt_scan = '0';
+				}
+				else if(scandata[2]){
+					curt_scan = '#';
+				}
+				else if(scandata[3]){
+					curt_scan = 'B';
+				}
+			}
 
-        if(curt_scan && curt_scan != prev_scan){
-            keyevent(curt_scan);
-        }
-        prev_scan = curt_scan;
-    }
+			msleep(1);
+		}
 
-    return 0;
+		if(curt_scan && curt_scan != prev_scan){
+			keyevent(curt_scan);
+		}
+
+		prev_scan = curt_scan;
+	}
+
+	return 0;
 }
 ///////////////////////// motor functions /////////////////////////
 static void setStep(int pin1, int pin2, int pin3, int pin4){
@@ -322,206 +347,212 @@ static void force(int oc){
 
 ///////////////////////// etc functions /////////////////////////
 static void set_light_state(void) {
-    //int brightness = get_value_from_lighe_sensor
-    //if brightness is over LIGHT_MIN, light_state = 0;
-    //less then LIGHT_MIN, light_state = 1
+	//int brightness = get_value_from_lighe_sensor
+	//if brightness is over LIGHT_MIN, light_state = 0;
+	//less then LIGHT_MIN, light_state = 1
 
-    int i;
-    int data = SPI_REQ_DATA;
-    int bright = 0;
+	int i;
+	int data = SPI_REQ_DATA;
+	int bright = 0;
 
-    gpio_set_value(LIGHT_EN, 0);
+	gpio_set_value(LIGHT_EN, 0);
 
-    for (i = 0; i < SPI_CLK_LENGTH; i++){
-        gpio_set_value(LIGHT_CLK, 0);
-        gpio_set_value(LIGHT_OUT, data & 0x01);
-        data >>= 1;
-        udelay(SPI_CLK);
-        gpio_set_value(LIGHT_CLK, 1);
-        if(i > 11){
-            bright <<= 1;
-            bright |= gpio_get_value(LIGHT_IN) & 0x01;
-        }
-        udelay(SPI_CLK);
-    }
-    gpio_set_value(LIGHT_EN, 1);
+	for (i = 0; i < SPI_CLK_LENGTH; i++){
+		gpio_set_value(LIGHT_CLK, 0);
+		gpio_set_value(LIGHT_OUT, data & 0x01);
+		data >>= 1;
+		udelay(SPI_CLK);
+		gpio_set_value(LIGHT_CLK, 1);
 
-    light_state = (bright < LIGHT_MIN) ? 1 : 0;
-    
+		if(i > 11){
+			bright <<= 1;
+			bright |= gpio_get_value(LIGHT_IN) & 0x01;
+		}
+
+		udelay(SPI_CLK);
+	}
+
+	gpio_set_value(LIGHT_EN, 1);
+
+	light_state = (bright < LIGHT_MIN) ? 1 : 0;
 }
 
 static void init_state(void) {
-    pir_state = 0;
-    light_state = 0;
-    gpio_set_value(LED, 0);
+	pir_state = 0;
+	light_state = 0;
+	gpio_set_value(LED, 0);
 	motor(0);
 }
 
 // when pir detected human
 static void led_timer_reset(void) {
-    printk("reset timer\n");
+	printk("reset timer\n");
 
-    set_light_state();
-    if((pir_state || keymat_state) && light_state){
+	set_light_state();
+	light_state = 1;
+	if((pir_state || keymat_state) && light_state){
 		gpio_set_value(LED, 1);
 	}
 		
-    if(gpio_get_value(LED)){
+	if(gpio_get_value(LED)){
 		del_timer(&led_timer);
 	}
 	
-    led_timer.expires = get_jiffies_64() + TIMER_SEC*HZ;
-    led_timer.function = led_timer_expired;
-    add_timer(&led_timer);
+	led_timer.expires = get_jiffies_64() + TIMER_SEC*HZ;
+	led_timer.function = led_timer_expired;
+	add_timer(&led_timer);
 }
 
 // when pir didn't detect human
 static void led_timer_expired(unsigned long data) {
-//    pir_state = 0;
+//	pir_state = 0;
 
-    if(keymat_state) {
-        led_timer_reset();
-    } else {
-        init_state();
-    }
+	if(keymat_state) {
+		led_timer_reset();
+	}
+	else {
+		init_state();
+	}
 }
 
 static irqreturn_t pir_isr(int irq, void* dev_id) {
-    printk("pir detected, %d\n", gpio_get_value(PIR));
-    pir_state = 1;
-    led_timer_reset(); 
+	printk("pir detected, %d\n", gpio_get_value(PIR));
+	pir_state = 1;
+	led_timer_reset(); 
 
-    return IRQ_HANDLED;
+	return IRQ_HANDLED;
 }
 
 ///////////////////////// fops init exit /////////////////////////
 static ssize_t keypad_read(struct file * file, char * buf, size_t len, loff_t * loff){
-    char * buff;
-    int msg_len, err;
+	char * buff;
+	int msg_len, err;
 
-    if(wait_event_interruptible(wait_queue, msg != 0)){
-        return -1;
-    }
+	if(wait_event_interruptible(wait_queue, msg != 0)){
+		return -1;
+	}
 
-    spin_lock(&event_lock);
-    switch (msg) {
-        case 1 :
-            buff = "ACCEPT";
-            break;
-        case 2 : 
-            buff = "REJECT";
-            break;
-        case 3 :
-            buff = "CHANGE";
-            break;
-        default : 
-            buff = "ERROR";
-    }
-    msg = 0;
-    spin_unlock(&event_lock);
-    msg_len = strlen(buff);
-    err = copy_to_user(buf, buff, msg_len);
+	spin_lock(&event_lock);
+	switch (msg) {
+		case 1 :
+			buff = "ACCEPT";
+			break;
+		case 2 : 
+			buff = "REJECT";
+			break;
+		case 3 :
+			buff = "CHANGE";
+			break;
+		default : 
+			buff = "ERROR";
+		}
+	msg = 0;
+	spin_unlock(&event_lock);
+	msg_len = strlen(buff);
+	err = copy_to_user(buf, buff, msg_len);
 
-    if(err > 0){
-        return err;
-    }
+	if(err > 0){
+		return err;
+	}
   
-    return msg_len;
+	return msg_len;
 }
 
 static int dev_open(struct inode *inode, struct file *file) {
-    printk("MODULE OPEN\n");
-    enable_irq(irq_pir);
+	printk("MODULE OPEN\n");
+	enable_irq(irq_pir);
   
-    return 0;
+	return 0;
 }
 static int dev_release(struct inode *inode, struct file *file) {
-    printk("MODULE RELEASE\n");
-    disable_irq(irq_pir);
+	printk("MODULE RELEASE\n");
+	disable_irq(irq_pir);
   
-    return 0;
+	return 0;
 }
 
 struct file_operations doorlock_fops = {
-    .read = keypad_read,
-    .open = dev_open,
-    .release = dev_release
+	.read = keypad_read,
+	.open = dev_open,
+	.release = dev_release
 };
 
 static dev_t dev_num;
 static struct cdev * cd_cdev;
 
 static int __init doorlock_init(void){
-    int ret;
+	int ret;
   
-    printk("INIT MODULE\n");
+	printk("INIT MODULE\n");
   
 //gpio request
-    gpio_request_array(dev_gpios, sizeof(dev_gpios)/sizeof(struct gpio));
+	gpio_request_array(dev_gpios, sizeof(dev_gpios)/sizeof(struct gpio));
 
 //chr dev init
-    alloc_chrdev_region(&dev_num, 0, 1, DEV_NAME);
-    cd_cdev = cdev_alloc();
-    cdev_init(cd_cdev, &doorlock_fops);
-    cdev_add(cd_cdev, dev_num, 1);
+	alloc_chrdev_region(&dev_num, 0, 1, DEV_NAME);
+	cd_cdev = cdev_alloc();
+	cdev_init(cd_cdev, &doorlock_fops);
+	cdev_add(cd_cdev, dev_num, 1);
 
 //init password
-    password = (char *)kmalloc(PW_MAX_LENGTH * sizeof(char), GFP_KERNEL);
+	password = (char *)kmalloc(PW_MAX_LENGTH * sizeof(char), GFP_KERNEL);
 
-    init_waitqueue_head(&wait_queue);
+	init_waitqueue_head(&wait_queue);
   
 //init timer
-    init_timer(&reset_timer);
-    reset_timer.function = reset_pos_func;
-    reset_timer.data = 0L;
+	init_timer(&reset_timer);
+	reset_timer.function = reset_pos_func;
+	reset_timer.data = 0L;
   
-    init_timer(&motor_timer);
-    init_timer(&led_timer); 
+	init_timer(&motor_timer);
+	init_timer(&led_timer); 
   
 //init keypad thread
-    keypad_task = kthread_create(keypad_scan_thread, NULL, "keypad_scan_thread");
-    if(IS_ERR(keypad_task)){
-        keypad_task = NULL;
-        printk("KEYPAD_SCAN_TASK CREATE ERROR\n");
-    }
-    wake_up_process(keypad_task);
+	keypad_task = kthread_create(keypad_scan_thread, NULL, "keypad_scan_thread");
+	if(IS_ERR(keypad_task)){
+		keypad_task = NULL;
+		printk("KEYPAD_SCAN_TASK CREATE ERROR\n");
+	}
+	wake_up_process(keypad_task);
 
 //init irq
-    irq_pir = gpio_to_irq(PIR);
-    ret = request_irq(irq_pir, pir_isr, IRQF_TRIGGER_RISING, "pir_irq", NULL);
-    if(ret) {
-        printk("request irq err %d\n", ret);
-        free_irq(irq_pir, NULL);
-    } else {
-        disable_irq(irq_pir);
-    }
+	irq_pir = gpio_to_irq(PIR);
 
-    enable_irq(irq_pir);
+	ret = request_irq(irq_pir, pir_isr, IRQF_TRIGGER_FALLING, "pir_irq", NULL);
+	if(ret) {
+		printk("request irq err %d\n", ret);
+		free_irq(irq_pir, NULL);
+	}
+	else {
+		disable_irq(irq_pir);
+	}
 
-    return 0;
+	enable_irq(irq_pir);
+
+	return 0;
 }
 
 static void __exit doorlock_exit(void){
-    printk("EXIT MODULE\n");
+	printk("EXIT MODULE\n");
 
 //chr dev exit 
-    cdev_del(cd_cdev);
-    unregister_chrdev_region(dev_num, 1);
+	cdev_del(cd_cdev);
+	unregister_chrdev_region(dev_num, 1);
 
 //gpio free
-    gpio_free_array(dev_gpios, sizeof(dev_gpios)/sizeof(struct gpio));
+	gpio_free_array(dev_gpios, sizeof(dev_gpios)/sizeof(struct gpio));
 
 //free irq
-    free_irq(irq_pir, NULL);
+	free_irq(irq_pir, NULL);
   
 //del timer
-    del_timer(&reset_timer);
-    del_timer(&motor_timer);
-    del_timer(&led_timer);
+	del_timer(&reset_timer);
+	del_timer(&motor_timer);
+	del_timer(&led_timer);
   
-    if(keypad_task){
-        kthread_stop(keypad_task);
-    }
+	if(keypad_task){
+		kthread_stop(keypad_task);
+	}
 }
 
 module_init(doorlock_init);
