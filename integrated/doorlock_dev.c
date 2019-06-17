@@ -110,6 +110,8 @@ static struct gpio dev_gpios[18] = {{LED, GPIOF_OUT_INIT_LOW, "led"},
 
 ///////////////////////// keymatrix functions /////////////////////////
 static void reset_pos_func(unsigned long data){
+	keymat_state = 0;	//spin lock?
+	
     printk("keypad : timeout, pos = 0\n");
     pos = 0;
     if(newpass){
@@ -120,7 +122,10 @@ static void reset_pos_func(unsigned long data){
 }
 
 static int keyevent(char key){
+	keymat_state = 1;	//spin lock?
+	
     mod_timer(&reset_timer, jiffies + 5*HZ);
+	
     if(key >= '0' && key <= '9'){
         if(mode){
             newpass[pos] = key;
@@ -287,8 +292,8 @@ static void door_close(unsigned long data){
 	}
 }
 
-static void motor(int pir){
-	if(pir){
+static void motor(int oc){
+	if(oc){
 		if(timer_pending(&motor_timer)){
 			del_timer(&motor_timer);
 		}
@@ -298,12 +303,11 @@ static void motor(int pir){
 		if(!timer_pending(&motor_timer)){
 			motor_timer.function = door_close;
 			motor_timer.data = 0L;
-			motor_timer.expires = jiffies + (10 * HZ); //can change
+			motor_timer.expires = jiffies + (5 * HZ); //can change
 			add_timer(&motor_timer);
 		}
 	}	//close: 0
 }
-//pir data handler
 
 static void force(int oc){
 	if(timer_pending(&motor_timer)){
@@ -324,13 +328,6 @@ static void force(int oc){
 }
 
 ///////////////////////// etc functions /////////////////////////
-//if request failed, consider keymat_state is 0
-static void request_keymat_state(void) {
-    //int received vaule = get_vaule_from_pi2
-    //if received value is valid, keymat_state = received value
-    //if received value is invalid(failed), keymat_state is 0
-}
-
 static void set_light_state(void) {
     //int brightness = get_value_from_lighe_sensor
     //if brightness is over LIGHT_MIN, light_state = 0;
@@ -363,8 +360,8 @@ static void set_light_state(void) {
 static void init_state(void) {
     pir_state = 0;
     light_state = 0;
-    keymat_state = 0;
     gpio_set_value(LED, 0);
+	motor(0);
 }
 
 // when pir detected human
@@ -372,9 +369,14 @@ static void led_timer_reset(void) {
     printk("reset timer\n");
 
     set_light_state();
-    if((pir_state || keymat_state) && light_state) gpio_set_value(LED, 1);
-
-    if(gpio_get_value(LED)) del_timer(&led_timer);
+    if((pir_state || keymat_state) && light_state){
+		gpio_set_value(LED, 1);
+	}
+		
+    if(gpio_get_value(LED)){
+		del_timer(&led_timer);
+	}
+	
     led_timer.expires = get_jiffies_64() + TIMER_SEC*HZ;
     led_timer.function = led_timer_expired;
     add_timer(&led_timer);
@@ -382,8 +384,7 @@ static void led_timer_reset(void) {
 
 // when pir didn't detect human
 static void led_timer_expired(unsigned long data) {
-    pir_state = 0;
-    request_keymat_state();
+//    pir_state = 0;
 
     if(keymat_state) {
         led_timer_reset();
@@ -413,6 +414,7 @@ static ssize_t keypad_read(struct file * file, char * buf, size_t len, loff_t * 
     switch (msg) {
         case 1 :
             buff = "ACCEPT";
+			motor(1);
             break;
         case 2 : 
             buff = "REJECT";
@@ -447,30 +449,8 @@ static int dev_release(struct inode *inode, struct file *file) {
   
     return 0;
 }
-/*
-static long door_ioctl(struct file *file, unsigned int cmd, unsigned long arg){
-    int pir = 0;
-    int oc = 0;
-
-	switch(cmd){
-		case MOTOR:
-			pir = (int)arg;
-			motor(pir);
-			break;
-		case FORCE:
-			oc = (int)arg;
-			force(oc);
-			break;
-		default:
-			return -1;
-		}
-
-    return 0;
-}
-*/
 
 struct file_operations doorlock_fops = {
-//    .unlocked_ioctl = door_ioctl,
     .read = keypad_read,
     .open = dev_open,
     .release = dev_release
@@ -516,7 +496,7 @@ static int __init doorlock_init(void){
 
 //init irq
     irq_pir = gpio_to_irq(PIR);
-    ret = request_irq(irq_pir, pir_isr, IRQF_TRIGGER_FALLING, "pir_irq", NULL);
+    ret = request_irq(irq_pir, pir_isr, IRQF_TRIGGER_RISING, "pir_irq", NULL);
     if(ret) {
         printk("request irq err %d\n", ret);
         free_irq(irq_pir, NULL);
@@ -525,7 +505,7 @@ static int __init doorlock_init(void){
     }
 
     enable_irq(irq_pir);
-  
+
     return 0;
 }
 
