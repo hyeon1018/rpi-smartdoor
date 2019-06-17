@@ -142,6 +142,7 @@ static int keyevent(char key){
             spin_lock(&event_lock);
             msg = 1;
             spin_unlock(&event_lock);
+			motor(1);
         }else{
             spin_lock(&event_lock);
             msg = 2;
@@ -393,7 +394,7 @@ static irqreturn_t pir_isr(int irq, void* dev_id) {
     return IRQ_HANDLED;
 }
 
-///////////////////////// ioctl init exit /////////////////////////
+///////////////////////// fops init exit /////////////////////////
 static ssize_t keypad_read(struct file * file, char * buf, size_t len, loff_t * loff){
     char * buff;
     int msg_len, err;
@@ -406,7 +407,6 @@ static ssize_t keypad_read(struct file * file, char * buf, size_t len, loff_t * 
     switch (msg) {
         case 1 :
             buff = "ACCEPT";
-			motor(1);
             break;
         case 2 : 
             buff = "REJECT";
