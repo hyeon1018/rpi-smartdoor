@@ -134,7 +134,7 @@ static int keyevent(char key){
 			pos = 0;
 		}
 	}
-	else if(key == '#'){
+	else if(key == '#' && pir_state == 1){
 		if(mode){
 			newpass[pos] = '#';
 			kfree(password);
@@ -149,11 +149,7 @@ static int keyevent(char key){
 			spin_lock(&event_lock);
 			msg = 1;
 			spin_unlock(&event_lock);
-
-			if(pir_state == 1){
-				motor(1);
-			}
-			motor(0);
+			motor(1);
 		}else{
 			spin_lock(&event_lock);
 			msg = 2;
@@ -289,7 +285,7 @@ static void door_open(void){
 		for(i = 0; i < STEPS * 64; i++){
 			for(j = 0; j < 8; j++){
 				setStep(steps[j][0], steps[j][1], steps[j][2], steps[j][3]);
-				mdelay(1);
+				mdelay(5);
 			}
 		}
 
@@ -306,7 +302,7 @@ static void door_close(unsigned long data){
 		for(i = 0; i < STEPS * 64; i++){
 			for(j = 7; j >= 0; j--){
 				setStep(steps[j][0], steps[j][1], steps[j][2], steps[j][3]);
-				mdelay(1);
+				mdelay(5);
 			}
 		}
 
@@ -329,6 +325,8 @@ static void motor(int oc){
 			add_timer(&motor_timer);
 		}
 	}	//close: 0
+
+	printk("motor activated: %d\n", oc);
 }
 
 static void force(int oc){
@@ -393,7 +391,8 @@ static void led_timer_reset(void) {
 	printk("reset timer\n");
 
 	set_light_state();
-	light_state = 1;
+//	light_state = 1;
+	pir_state = 1;
 	if((pir_state || keymat_state) && light_state){
 		gpio_set_value(LED, 1);
 	}
@@ -421,7 +420,7 @@ static void led_timer_expired(unsigned long data) {
 
 static irqreturn_t pir_isr(int irq, void* dev_id) {
 	printk("pir detected, %d\n", gpio_get_value(PIR));
-	pir_state = 1;
+	//pir_state = 1;
 	led_timer_reset(); 
 
 	return IRQ_HANDLED;
