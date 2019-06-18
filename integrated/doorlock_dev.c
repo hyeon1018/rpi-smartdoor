@@ -32,13 +32,15 @@
 #define STEPS 8
 
 //etc.
-#define LED 14 //LED2 where?
+#define SPEAKER 5
+#define LED 14
 #define PIR 15
 #define LIGHT_CLK 18
 #define LIGHT_IN 23
 #define LIGHT_OUT 24
 #define LIGHT_EN 25
 
+#define SPEAKER_HZ 700
 #define LIGHT_MIN 500           // min value of light sensor for LED on
 #define TIMER_SEC 10            // time of light lasts on
 
@@ -74,7 +76,7 @@ static void force(int oc);
 ///////////////////////// declare etc /////////////////////////
 
 static int irq_pir;
-//pir is 1 when deteced, light is 1 when light has to turn on, keymat is 1 when detected 
+//light is 1 when light has to turn on
 static int door_state, light_state = 0;
 static struct timer_list led_timer;
 
@@ -82,12 +84,13 @@ static void timer_expired(unsigned long data);
 static void timer_reset(void);
 
 ///////////////////////// gpios /////////////////////////
-static struct gpio dev_gpios[18] = {{LED, GPIOF_OUT_INIT_LOW, "led"},
+static struct gpio dev_gpios[19] = {{LED, GPIOF_OUT_INIT_LOW, "led"},
 				{PIR, GPIOF_IN, "pir"},
 				{LIGHT_CLK, GPIOF_INIT_LOW, "light_clk"},
 				{LIGHT_IN, GPIOF_IN, "light_in"},
 				{LIGHT_OUT, GPIOF_INIT_LOW, "light_data_out"},
 				{LIGHT_EN, GPIOF_INIT_HIGH, "light_enable"},
+				{SPEAKER, GPIOF_OUT_INIT_LOW, "speaker"},
 				{K_SCAN1, GPIOF_OUT_INIT_LOW, "key_scan_1"},
 				{K_SCAN2, GPIOF_OUT_INIT_LOW, "key_scan_2"},
 				{K_SCAN3, GPIOF_OUT_INIT_LOW, "key_scan_3"},
@@ -101,12 +104,27 @@ static struct gpio dev_gpios[18] = {{LED, GPIOF_OUT_INIT_LOW, "led"},
 				{PIN3, GPIOF_OUT_INIT_LOW, "p3"},
 				{PIN4, GPIOF_OUT_INIT_LOW, "p4"}};
 
+static void beep(int length, int count) {
+	int i, j;
+	for (i = 0 ; i < count ; i++){
+		for (j = 0 ; j < 100 * length ; j++){
+			gpio_set_value(SPEAKER, 1);
+			udelay(SPEAKER_HZ);
+			gpio_set_value(SPEAKER, 0);
+			udelay(SPEAKER_HZ);
+		}
+		if(i < count - 1){
+			mdelay(500);
+		}
+	}
+}
 
 ///////////////////////// keymatrix functions /////////////////////////
 static int keyevent(char key){
 	timer_reset();
 	
 	if(key >= '0' && key <= '9'){
+		beep(1, 1);
 		if(mode){
 			newpass[pos] = key;
 			pos++;
@@ -148,7 +166,9 @@ static int keyevent(char key){
 		pos = 0;
 	}
 	else if(key == 'O'){
+		beep(2, 3);
 		printk("open door\n");
+		motor(1);
 		pos = 0;
 	}
 
@@ -390,13 +410,12 @@ static void timer_reset(void) {
 
 // when pir didn't detect human
 static void timer_expired(unsigned long data) {
-//	pir_state = 0;
+
 	init_state();
 }
 
 static irqreturn_t pir_isr(int irq, void* dev_id) {
 	//printk("pir detected, %d\n", gpio_get_value(PIR));
-	//pir_state = 1;
 	timer_reset(); 
 
 	return IRQ_HANDLED;
@@ -516,6 +535,7 @@ static void __exit doorlock_exit(void){
 	unregister_chrdev_region(dev_num, 1);
 
 //gpio free
+	gpio_set_value(SPEAKER, 0);
 	gpio_free_array(dev_gpios, sizeof(dev_gpios)/sizeof(struct gpio));
 
 //free irq
