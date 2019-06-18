@@ -51,10 +51,9 @@
 MODULE_LICENSE("GPL");
 
 ///////////////////////// declare key matrix /////////////////////////
-spinlock_t event_lock;
+spinlock_t event_lock, timer_lock;
 wait_queue_head_t wait_queue;
 struct task_struct * keypad_task = NULL;
-static struct timer_list reset_timer;
 
 char * password = NULL;
 char * newpass = NULL;
@@ -68,7 +67,6 @@ int steps[STEPS][4] = {
 	{0, 0, 1, 0}, {0, 0, 1, 1}, {0, 0, 0, 1}, {1, 0, 0, 1}
 };
 
-static int door_state = 0; //0:closed 1: opened
 static struct timer_list motor_timer;
 static void motor(int oc);
 static void force(int oc);
@@ -77,10 +75,11 @@ static void force(int oc);
 
 static int irq_pir;
 //pir is 1 when deteced, light is 1 when light has to turn on, keymat is 1 when detected 
-static int pir_state, light_state, keymat_state = 0;
+static int door_state, light_state = 0;
 static struct timer_list led_timer;
 
-static void led_timer_expired(unsigned long data);
+static void timer_expired(unsigned long data);
+static void timer_reset(void);
 
 ///////////////////////// gpios /////////////////////////
 static struct gpio dev_gpios[18] = {{LED, GPIOF_OUT_INIT_LOW, "led"},
@@ -104,23 +103,8 @@ static struct gpio dev_gpios[18] = {{LED, GPIOF_OUT_INIT_LOW, "led"},
 
 
 ///////////////////////// keymatrix functions /////////////////////////
-static void reset_pos_func(unsigned long data){
-	keymat_state = 0;	//spin lock?
-	
-	printk("keypad : timeout, pos = 0\n");
-	pos = 0;
-
-	if(newpass){
-		kfree(newpass);
-		newpass = NULL;
-		mode = 0;
-	}
-}
-
 static int keyevent(char key){
-	keymat_state = 1;	//spin lock?
-	
-	mod_timer(&reset_timer, jiffies + 5*HZ);
+	timer_reset();
 	
 	if(key >= '0' && key <= '9'){
 		if(mode){
@@ -134,7 +118,7 @@ static int keyevent(char key){
 			pos = 0;
 		}
 	}
-	else if(key == '#' && pir_state == 1){
+	else if(key == '#'){
 		if(mode){
 			newpass[pos] = '#';
 			kfree(password);
@@ -168,8 +152,7 @@ static int keyevent(char key){
 		pos = 0;
 	}
 
-	printk("keypad : pos : %d\n", pos);
-
+	
 	return 0;
 }
 
@@ -285,10 +268,10 @@ static void door_open(void){
 		for(i = 0; i < STEPS * 64; i++){
 			for(j = 0; j < 8; j++){
 				setStep(steps[j][0], steps[j][1], steps[j][2], steps[j][3]);
-				mdelay(5);
+				mdelay(1);
 			}
 		}
-
+		setStep(0, 0, 0, 0);
 		door_state = 1;
 	}
 }
@@ -302,9 +285,11 @@ static void door_close(unsigned long data){
 		for(i = 0; i < STEPS * 64; i++){
 			for(j = 7; j >= 0; j--){
 				setStep(steps[j][0], steps[j][1], steps[j][2], steps[j][3]);
-				mdelay(5);
+				mdelay(1);
 			}
 		}
+
+		setStep(0, 0, 0, 0);
 
 		door_state = 0;
 	}
@@ -380,48 +365,39 @@ static void set_light_state(void) {
 }
 
 static void init_state(void) {
-	pir_state = 0;
-	light_state = 0;
 	gpio_set_value(LED, 0);
 	motor(0);
+	pos = 0;
+
+	if(newpass){
+		kfree(newpass);
+		newpass = NULL;
+		mode = 0;
+	}
 }
 
 // when pir detected human
-static void led_timer_reset(void) {
+static void timer_reset(void) {
 	printk("reset timer\n");
 
 	set_light_state();
-//	light_state = 1;
-	pir_state = 1;
-	if((pir_state || keymat_state) && light_state){
+	if(light_state){
 		gpio_set_value(LED, 1);
 	}
-		
-	if(gpio_get_value(LED)){
-		del_timer(&led_timer);
-	}
-	
-	led_timer.expires = get_jiffies_64() + TIMER_SEC*HZ;
-	led_timer.function = led_timer_expired;
-	add_timer(&led_timer);
+
+	mod_timer(&led_timer, jiffies + TIMER_SEC*HZ);
 }
 
 // when pir didn't detect human
-static void led_timer_expired(unsigned long data) {
+static void timer_expired(unsigned long data) {
 //	pir_state = 0;
-
-	if(keymat_state) {
-		led_timer_reset();
-	}
-	else {
-		init_state();
-	}
+	init_state();
 }
 
 static irqreturn_t pir_isr(int irq, void* dev_id) {
-	printk("pir detected, %d\n", gpio_get_value(PIR));
+	//printk("pir detected, %d\n", gpio_get_value(PIR));
 	//pir_state = 1;
-	led_timer_reset(); 
+	timer_reset(); 
 
 	return IRQ_HANDLED;
 }
@@ -502,13 +478,10 @@ static int __init doorlock_init(void){
 
 	init_waitqueue_head(&wait_queue);
   
-//init timer
-	init_timer(&reset_timer);
-	reset_timer.function = reset_pos_func;
-	reset_timer.data = 0L;
-  
 	init_timer(&motor_timer);
 	init_timer(&led_timer); 
+	led_timer.function = timer_expired;
+//init spinlock
   
 //init keypad thread
 	keypad_task = kthread_create(keypad_scan_thread, NULL, "keypad_scan_thread");
@@ -549,7 +522,6 @@ static void __exit doorlock_exit(void){
 	free_irq(irq_pir, NULL);
   
 //del timer
-	del_timer(&reset_timer);
 	del_timer(&motor_timer);
 	del_timer(&led_timer);
   

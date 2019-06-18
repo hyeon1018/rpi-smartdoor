@@ -1,7 +1,7 @@
 obj-m := doorlock_dev.o
 
 KDIR := ~/linux-rpi/
-ARM := ARCH=arm CROSS_COMPILE=/usr/bin/arm-linux-gnueabi-
+ARM := ARCH=arm CROSS_COMPILE=arm-linux-gnueabi-
 PWD := $(shell pwd)
 
 default:
