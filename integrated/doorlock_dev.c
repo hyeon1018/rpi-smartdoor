@@ -59,7 +59,7 @@ struct task_struct * keypad_task = NULL;
 
 char * password = NULL;
 char * newpass = NULL;
-int msg = 0; // 1 ACCEPT, 2 REJECT;
+int msg = 0;
 int pos = 0;
 int mode = 0; // 1 when change password.
 
@@ -167,13 +167,18 @@ static int keyevent(char key){
 		pos = 0;
 	}
 	else if(key == 'O'){
-		beep(2, 3);
+		beep(1, 3);
 		printk("open door\n");
+		motor_action(1);
+		pos = 0;
+	}
+	else if(key == 'K'){
+		beep(3, 1);
+		printk("keep_door_open / close\n");
 		keep_door_open();
 		pos = 0;
 	}
 
-	
 	return 0;
 }
 
@@ -205,61 +210,28 @@ static int keypad_scan_thread(void * data){
  			scandata[3] = gpio_get_value(K_IN4);
 
 			if(i == 0){
-				if(scandata[0]){
-					curt_scan = '1';
-				}
-				else if(scandata[1]){
-					curt_scan = '2';
-               			}
-				else if(scandata[2]){
-					curt_scan = '3';
-			 	}
-				else if(scandata[3]){
-					curt_scan = 'R';
-				}
+				if(scandata[0])	curt_scan = '1';
+				else if(scandata[1]) curt_scan = '2';
+				else if(scandata[2]) curt_scan = '3';
+				else if(scandata[3]) curt_scan = 'R';
 			}
 			else if(i == 1){
-				if(scandata[0]){
-					curt_scan = '4';
-        		        }
-				else if(scandata[1]){
-					curt_scan = '5';
-        		        }
-				else if(scandata[2]){
-					curt_scan = '6';
-				}
-				else if(scandata[3]){
-					curt_scan = 'O';
-				}
+				if(scandata[0]) curt_scan = '4';
+				else if(scandata[1]) curt_scan = '5';
+				else if(scandata[2]) curt_scan = '6';
+				else if(scandata[3]) curt_scan = 'O';
 			}else if(i == 2){
-				if(scandata[0]){
-					curt_scan = '7';
-				}
-				else if(scandata[1]){
-					curt_scan = '8';
-				}
-				else if(scandata[2]){
-					curt_scan = '9';
-				}
-				else if(scandata[3]){
-					curt_scan = 'A';
-				}
+				if(scandata[0]) curt_scan = '7';
+				else if(scandata[1]) curt_scan = '8';
+				else if(scandata[2]) curt_scan = '9';
+				else if(scandata[3]) curt_scan = 'K';
 			}
 			else if(i == 3){
-				if(scandata[0]){
- 					curt_scan = '*';
-				}
-				else if(scandata[1]){
-					curt_scan = '0';
-				}
-				else if(scandata[2]){
-					curt_scan = '#';
-				}
-				else if(scandata[3]){
-					curt_scan = 'B';
-				}
+				if(scandata[0]) curt_scan = '*';
+				else if(scandata[1]) curt_scan = '0';
+				else if(scandata[2]) curt_scan = '#';
+				else if(scandata[3]) curt_scan = 'B';
 			}
-
 			msleep(1);
 		}
 
@@ -346,6 +318,7 @@ static void keep_door_open(void){
 		motor_timer.function = alert_open;
 		motor_timer.data = 0L;
 		motor_timer.expires = jiffies + (20 * HZ); //can change
+		add_timer(&motor_timer);
 	}
 	else{
 		door_close(0);
@@ -357,7 +330,10 @@ static void keep_door_open(void){
 static void alert_open(unsigned long data){
 	if(door_state == 1){
 		beep(1, 2);
-		//send msg
+		spin_lock(&event_lock);
+		msg = 4;
+		spin_unlock(&event_lock);
+		wake_up_interruptible(&wait_queue);
 	}
 }
 
@@ -395,7 +371,6 @@ static void set_light_state(void) {
 
 static void init_state(unsigned long data) {
 	gpio_set_value(LED, 0);
-	motor_action(0);
 	pos = 0;
 
 	if(newpass){
@@ -444,6 +419,9 @@ static ssize_t keypad_read(struct file * file, char * buf, size_t len, loff_t * 
 			break;
 		case 3 :
 			buff = "CHANGE";
+			break;
+		case 4 :
+			buff = "ALTER";
 			break;
 		default : 
 			buff = "ERROR";
