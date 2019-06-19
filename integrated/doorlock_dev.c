@@ -78,9 +78,8 @@ static void force(int oc);
 static int irq_pir;
 //light is 1 when light has to turn on
 static int door_state, light_state = 0;
-static struct timer_list led_timer;
+static struct timer_list human_timer;
 
-static void timer_expired(unsigned long data);
 static void timer_reset(void);
 
 ///////////////////////// gpios /////////////////////////
@@ -384,7 +383,7 @@ static void set_light_state(void) {
 	light_state = (bright < LIGHT_MIN) ? 1 : 0;
 }
 
-static void init_state(void) {
+static void init_state(unsigned long data) {
 	gpio_set_value(LED, 0);
 	motor(0);
 	pos = 0;
@@ -401,21 +400,16 @@ static void timer_reset(void) {
 	printk("reset timer\n");
 
 	set_light_state();
+
 	if(light_state){
 		gpio_set_value(LED, 1);
 	}
 
-	mod_timer(&led_timer, jiffies + TIMER_SEC*HZ);
-}
-
-// when pir didn't detect human
-static void timer_expired(unsigned long data) {
-
-	init_state();
+	mod_timer(&human_timer, jiffies + TIMER_SEC*HZ);
 }
 
 static irqreturn_t pir_isr(int irq, void* dev_id) {
-	//printk("pir detected, %d\n", gpio_get_value(PIR));
+	printk("pir detected, %d\n", gpio_get_value(PIR));
 	timer_reset(); 
 
 	return IRQ_HANDLED;
@@ -498,9 +492,8 @@ static int __init doorlock_init(void){
 	init_waitqueue_head(&wait_queue);
   
 	init_timer(&motor_timer);
-	init_timer(&led_timer); 
-	led_timer.function = timer_expired;
-//init spinlock
+	init_timer(&human_timer); 
+	human_timer.function = init_state;
   
 //init keypad thread
 	keypad_task = kthread_create(keypad_scan_thread, NULL, "keypad_scan_thread");
@@ -543,7 +536,7 @@ static void __exit doorlock_exit(void){
   
 //del timer
 	del_timer(&motor_timer);
-	del_timer(&led_timer);
+	del_timer(&human_timer);
   
 	if(keypad_task){
 		kthread_stop(keypad_task);
