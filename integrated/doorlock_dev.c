@@ -70,8 +70,10 @@ int steps[STEPS][4] = {
 };
 
 static struct timer_list motor_timer;
-static void motor(int oc);
-static void force(int oc);
+
+static void motor_action(int oc);
+static void keep_door_open(void);
+static void alert_open(unsigned long data);
 
 ///////////////////////// declare etc /////////////////////////
 
@@ -150,7 +152,7 @@ static int keyevent(char key){
 			spin_lock(&event_lock);
 			msg = 1;
 			spin_unlock(&event_lock);
-			motor(1);
+			motor_action(1);
 		}else{
 			spin_lock(&event_lock);
 			msg = 2;
@@ -167,7 +169,7 @@ static int keyevent(char key){
 	else if(key == 'O'){
 		beep(2, 3);
 		printk("open door\n");
-		motor(1);
+		keep_door_open();
 		pos = 0;
 	}
 
@@ -314,13 +316,13 @@ static void door_close(unsigned long data){
 	}
 }
 
-static void motor(int oc){
+static void motor_action(int oc){
 	if(oc){
 		if(timer_pending(&motor_timer)){
 			del_timer(&motor_timer);
 		}
 		door_open();
-	}	//open: 1
+	}	//open: 1 
 	else{
 		if(!timer_pending(&motor_timer)){
 			motor_timer.function = door_close;
@@ -328,26 +330,34 @@ static void motor(int oc){
 			motor_timer.expires = jiffies + (5 * HZ); //can change
 			add_timer(&motor_timer);
 		}
-	}	//close: 0
+	}	//close: 0 set timer for closing door
 
 	printk("motor activated: %d\n", oc);
 }
 
-static void force(int oc){
+static void keep_door_open(void){
 	if(timer_pending(&motor_timer)){
 		del_timer(&motor_timer);
 	}
 
-	if(oc){
+	if(door_state == 0){
 		door_open();
-
-		motor_timer.function = door_close;
+		
+		motor_timer.function = alert_open;
 		motor_timer.data = 0L;
-		motor_timer.expires = jiffies + (5 * HZ); //can change
-		add_timer(&motor_timer);
+		motor_timer.expires = jiffies + (20 * HZ); //can change
 	}
 	else{
 		door_close(0);
+	}
+	
+	printk("keep button pressed. Door state = %d\n", door_state);
+}
+
+static void alert_open(unsigned long data){
+	if(door_state == 1){
+		beep(1, 2);
+		//send msg
 	}
 }
 
@@ -385,7 +395,7 @@ static void set_light_state(void) {
 
 static void init_state(unsigned long data) {
 	gpio_set_value(LED, 0);
-	motor(0);
+	motor_action(0);
 	pos = 0;
 
 	if(newpass){
