@@ -1,4 +1,6 @@
+#-*- coding:utf-8 -*-
 import paho.mqtt.client as mqtt
+from datetime import datetime
 import telegram
 import json
 import io
@@ -15,11 +17,13 @@ def on_connect(client, userdata, flags, rc):
 	client.subscribe("device/#")
 
 def on_message(client, userdata, msg):
+	now = datetime.now()
+	time_text = now.strftime('%Y-%m-%d %H:%M:%S')
 	print("message get : " + str(msg.topic))
 	topic = str(msg.topic).split('/')
 	if topic[2] == "text":
-		text = msg.payload.decode('utf-8')
-		bot.sendMessage(chat_id=my_chat_id, text = "[{}]\n{}".format(topic[1], text))
+		text = msg.payload
+		bot.sendMessage(chat_id=my_chat_id, text = "[{}]\n{}\n{}".format(topic[1], text, time_text))
 	elif topic[2] == "image":
 		bio = io.BytesIO(msg.payload)
 		bio.seek(0)
@@ -27,9 +31,9 @@ def on_message(client, userdata, msg):
 	elif topic[2] == "connected":
 		state = msg.payload.decode('utf-8')
 		if state == "True":
-			bot.sendMessage(chat_id=my_chat_id, text = "New Device Connected : {}".format(topic[1]))
+			bot.sendMessage(chat_id=my_chat_id, text = "New Device Connected : {}\n{}".format(topic[1], time_text))
 		elif state == "False":
-			bot.sendMessage(chat_id=my_chat_id, text = "Device Disconnected : {}".format(topic[1]))
+			bot.sendMessage(chat_id=my_chat_id, text = "Device Disconnected : {}\n{}".format(topic[1], time_text))
 	else:
 		print(msg.payload)
 
