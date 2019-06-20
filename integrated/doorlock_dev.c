@@ -139,6 +139,7 @@ static int keyevent(char key){
 	}
 	else if(key == '#'){
 		if(mode){
+			beep(1, 1);
 			newpass[pos] = '#';
 			kfree(password);
 			password = newpass;
@@ -149,11 +150,13 @@ static int keyevent(char key){
 			msg = 3;
 			spin_unlock(&event_lock);
 		}else if(password[pos] == '#'){
+			beep(1, 1);
 			spin_lock(&event_lock);
 			msg = 1;
 			spin_unlock(&event_lock);
 			motor_action(1);
 		}else{
+			beep(1, 3);
 			spin_lock(&event_lock);
 			msg = 2;
 			spin_unlock(&event_lock);
@@ -162,12 +165,15 @@ static int keyevent(char key){
 		pos = 0;
 	}
 	else if(key == 'R'){
-		newpass = (char *)kmalloc(PW_MAX_LENGTH * sizeof(char), GFP_KERNEL);
+		beep(3, 1);
+		if(newpass == NULL){
+			newpass = (char *)kmalloc(PW_MAX_LENGTH * sizeof(char), GFP_KERNEL);
+		}
 		mode = 1;
 		pos = 0;
 	}
 	else if(key == 'O'){
-		beep(1, 3);
+		beep(1, 1);
 		motor_action(1);
 		pos = 0;
 	}
@@ -321,7 +327,7 @@ static void keep_door_open(void){
 
 static void alert_open(unsigned long data){
 	if(door_state == 1){
-		beep(1, 2);
+		beep(1, 3);
 		spin_lock(&event_lock);
 		msg = 4;
 		spin_unlock(&event_lock);
