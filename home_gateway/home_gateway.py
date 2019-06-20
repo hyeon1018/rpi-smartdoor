@@ -5,9 +5,12 @@ import telegram
 import json
 import io
 
+with open('config.json', 'r') as f:
+	config = json.load(f)
+
 # telegram token and chat id.
-my_token = ''
-my_chat_id = 0
+my_token = config['token']
+my_chat_id = config['chat_id']
 bot = telegram.Bot(token = my_token)
 
 def on_log(client, userdata, level, buf):
@@ -29,7 +32,7 @@ def on_message(client, userdata, msg):
 		bio.seek(0)
 		bot.send_photo(chat_id=my_chat_id, photo = bio)
 	elif topic[2] == "connected":
-		state = msg.payload.decode('utf-8')
+		state = msg.payload
 		if state == "True":
 			bot.sendMessage(chat_id=my_chat_id, text = "New Device Connected : {}\n{}".format(topic[1], time_text))
 		elif state == "False":
