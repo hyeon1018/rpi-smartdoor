@@ -433,23 +433,8 @@ static ssize_t keypad_read(struct file * file, char * buf, size_t len, loff_t * 
 	return msg_len;
 }
 
-static int dev_open(struct inode *inode, struct file *file) {
-	printk("MODULE OPEN\n");
-	enable_irq(irq_pir);
-  
-	return 0;
-}
-static int dev_release(struct inode *inode, struct file *file) {
-	printk("MODULE RELEASE\n");
-	disable_irq(irq_pir);
-  
-	return 0;
-}
-
 struct file_operations doorlock_fops = {
-	.read = keypad_read,
-	.open = dev_open,
-	.release = dev_release
+	.read = keypad_read
 };
 
 static dev_t dev_num;
@@ -497,8 +482,6 @@ static int __init doorlock_init(void){
 	else {
 		disable_irq(irq_pir);
 	}
-
-	enable_irq(irq_pir);
 
 	return 0;
 }
