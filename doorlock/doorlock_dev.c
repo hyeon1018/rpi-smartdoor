@@ -474,13 +474,10 @@ static int __init doorlock_init(void){
 //init irq
 	irq_pir = gpio_to_irq(PIR);
 
-	ret = request_irq(irq_pir, pir_isr, IRQF_TRIGGER_FALLING, "pir_irq", NULL);
+	ret = request_irq(irq_pir, pir_isr, IRQF_TRIGGER_RISING, "pir_irq", NULL);
 	if(ret) {
 		printk("request irq err %d\n", ret);
 		free_irq(irq_pir, NULL);
-	}
-	else {
-		disable_irq(irq_pir);
 	}
 
 	return 0;
