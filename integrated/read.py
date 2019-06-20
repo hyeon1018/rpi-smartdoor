@@ -8,7 +8,7 @@ device_name = "door"
 
 client = mqtt.Client("Door")
 client.will_set("device/{}/connected".format(device_name), "False", 0, False)
-client.connect("localhost", 1883, 60)
+client.connect("localhost", 1883, 0)
 client.publish("device/{}/connected".format(device_name), "True")
 
 def publish_image():

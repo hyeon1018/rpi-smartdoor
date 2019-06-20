@@ -168,13 +168,11 @@ static int keyevent(char key){
 	}
 	else if(key == 'O'){
 		beep(1, 3);
-		printk("open door\n");
 		motor_action(1);
 		pos = 0;
 	}
 	else if(key == 'K'){
 		beep(3, 1);
-		printk("keep_door_open / close\n");
 		keep_door_open();
 		pos = 0;
 	}
@@ -289,22 +287,18 @@ static void door_close(unsigned long data){
 }
 
 static void motor_action(int oc){
-	if(oc){
-		if(timer_pending(&motor_timer)){
-			del_timer(&motor_timer);
-		}
-		door_open();
-	}	//open: 1 
-	else{
-		if(!timer_pending(&motor_timer)){
-			motor_timer.function = door_close;
-			motor_timer.data = 0L;
-			motor_timer.expires = jiffies + (5 * HZ); //can change
-			add_timer(&motor_timer);
-		}
-	}	//close: 0 set timer for closing door
+	if(timer_pending(&motor_timer)){
+		del_timer(&motor_timer);
+	}
 
-	printk("motor activated: %d\n", oc);
+	if(door_state == 0){
+		door_open();
+	}
+	
+	motor_timer.function = door_close;
+	motor_timer.data = 0L;
+	motor_timer.expires = jiffies + (5 * HZ); //can change
+	add_timer(&motor_timer);
 }
 
 static void keep_door_open(void){
@@ -323,8 +317,6 @@ static void keep_door_open(void){
 	else{
 		door_close(0);
 	}
-	
-	printk("keep button pressed. Door state = %d\n", door_state);
 }
 
 static void alert_open(unsigned long data){
@@ -382,8 +374,6 @@ static void init_state(unsigned long data) {
 
 // when pir detected human
 static void timer_reset(void) {
-	printk("reset timer\n");
-
 	set_light_state();
 
 	if(light_state){
@@ -394,7 +384,6 @@ static void timer_reset(void) {
 }
 
 static irqreturn_t pir_isr(int irq, void* dev_id) {
-	printk("pir detected, %d\n", gpio_get_value(PIR));
 	timer_reset(); 
 
 	return IRQ_HANDLED;
