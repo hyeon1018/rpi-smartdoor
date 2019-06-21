@@ -293,36 +293,38 @@ static void door_close(unsigned long data){
 }
 
 static void motor_action(int oc){
-	if(timer_pending(&motor_timer)){
-		del_timer(&motor_timer);
+	if(oc){
+		if(door_state == 0){
+			door_open();
+			
+			motor_timer.function = door_close;
+			motor_timer.data = 0L;
+			motor_timer.expires = jiffies + (5 * HZ); //can change
+			add_timer(&motor_timer);
+		}
 	}
-
-	if(door_state == 0){
-		door_open();
+	else{
+		if(timer_pending(&motor_timer)){
+			del_timer(&motor_timer);
+		}
+		
+		door_close(0);	//checks door state inside
 	}
-	
-	motor_timer.function = door_close;
-	motor_timer.data = 0L;
-	motor_timer.expires = jiffies + (5 * HZ); //can change
-	add_timer(&motor_timer);
 }
 
 static void keep_door_open(void){
 	if(timer_pending(&motor_timer)){
 		del_timer(&motor_timer);
 	}
-
+	
 	if(door_state == 0){
 		door_open();
-		
-		motor_timer.function = alert_open;
-		motor_timer.data = 0L;
-		motor_timer.expires = jiffies + (20 * HZ); //can change
-		add_timer(&motor_timer);
 	}
-	else{
-		door_close(0);
-	}
+	
+	motor_timer.function = alert_open;
+	motor_timer.data = 0L;
+	motor_timer.expires = jiffies + (20 * HZ); //can change
+	add_timer(&motor_timer);
 }
 
 static void alert_open(unsigned long data){
