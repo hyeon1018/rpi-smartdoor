@@ -308,13 +308,13 @@ static void motor_action(int oc){
 			del_timer(&motor_timer);
 		}
 		
-		door_close();	//checks door state inside
+		door_close(0);	//checks door state inside
 	}
 }
 
 static void keep_door_open(void){
 	if(timer_pending(&motor_timer)){
-			del_timer(&motor_timer);
+		del_timer(&motor_timer);
 	}
 	
 	if(door_state == 0){
